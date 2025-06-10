@@ -1,0 +1,10 @@
+{
+  "workbench.colorTheme": "Default Dark+",
+  "editor.fontSize": 14,
+  "git.enabled": true,
+  "git.path": "git",
+  "remote.SSH.remotePlatform": {},
+  "workbench.editorAssociations": {
+    "*.mdc": "default"
+  }
+} 
