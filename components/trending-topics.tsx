@@ -10,6 +10,7 @@ import { TrendingUp, MessageCircle, Heart, Share, ExternalLink, RefreshCw, Loade
 import { formatNumber, useContentGeneration } from "@/lib/api-hooks"
 import { setLastScanTime, getLastScanTime, formatTimeAgo } from "@/lib/client-utils"
 import { getMonitoringSettings, getTikTokRegionDisplay } from "@/lib/settings-utils"
+import { useClientReddit } from "@/app/hooks/useClientReddit"
 import Link from "next/link"
 import { ContentIdea } from '@/lib/types'
 
@@ -101,10 +102,16 @@ export function TrendingTopics() {
     return () => clearInterval(interval)
   }, [])
 
-  // Simple state management instead of complex hooks
-  const [redditData, setRedditData] = useState<any>(null)
-  const [redditLoading, setRedditLoading] = useState(false)
-  const [redditError, setRedditError] = useState<string | null>(null)
+  // Get monitoring settings to determine which subreddit to use
+  const settings = getMonitoringSettings()
+  const primarySubreddit = settings.reddit.subreddits[0] || 'programming'
+  
+  // Use client-side Reddit hook to bypass server-side IP blocking
+  const { 
+    posts: redditPosts, 
+    loading: redditLoading, 
+    error: redditError 
+  } = useClientReddit(primarySubreddit, 10)
   
   const [twitterData, setTwitterData] = useState<any>(null)
   const [twitterLoading, setTwitterLoading] = useState(false)
@@ -119,27 +126,11 @@ export function TrendingTopics() {
   const [instagramError, setInstagramError] = useState<string | null>(null)
   
   // Manual refetch functions
-  const refetchReddit = async () => {
-    setRedditLoading(true)
-    setRedditError(null)
-    try {
-      const settings = getMonitoringSettings()
-      const subreddits = settings.reddit.subreddits.join(',')
-      const keywords = settings.reddit.keywords.join(',')
-      const response = await fetch(`/api/trending/reddit?limit=10&subreddits=${encodeURIComponent(subreddits)}&keywords=${encodeURIComponent(keywords)}&minUpvotes=${settings.reddit.minUpvotes}&time=day`)
-      const result = await response.json()
-      console.log('🔍 Manual Reddit fetch result:', result)
-      setRedditData(result)
-      setLastScanTime(new Date().toISOString())
-      return result
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Failed to fetch Reddit data'
-      setRedditError(errorMsg)
-      console.error('❌ Reddit fetch error:', error)
-      throw error
-    } finally {
-      setRedditLoading(false)
-    }
+  const refetchReddit = () => {
+    // Client-side Reddit hook handles automatic refetching
+    // This function exists for compatibility but hook handles the refresh
+    setLastScanTime(new Date().toISOString())
+    console.log('🔍 Reddit refetch requested - handled by client-side hook')
   }
   
   const refetchTwitter = async () => {
@@ -463,8 +454,8 @@ export function TrendingTopics() {
               <LoadingState platform="Reddit" />
             ) : redditError ? (
               <ErrorState error={redditError} onRetry={refetchReddit} platform="Reddit" />
-            ) : redditData?.data?.posts && redditData.data.posts.length > 0 ? (
-              redditData.data.posts.map((post: any) => (
+            ) : redditPosts && redditPosts.length > 0 ? (
+              redditPosts.map((post: any) => (
                 <div key={post.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -494,9 +485,9 @@ export function TrendingTopics() {
                       </div>
                       <div className="flex items-center gap-1">
                         <MessageCircle className="h-4 w-4" />
-                          {formatNumber(post.comments)} comments
+                          {formatNumber(post.num_comments)} comments
                         </div>
-                        <span className="text-xs text-gray-500">{formatTimeAgo(new Date(post.created_utc * 1000).toISOString())}</span>
+                        <span className="text-xs text-gray-500">{formatTimeAgo(post.posted_date)}</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <Badge className={getEngagementColor(post.score, 'reddit')}>

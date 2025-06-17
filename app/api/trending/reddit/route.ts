@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateLimit, getEngagementLabel, getEngagementColor } from '@/lib/api-utils'
+import { TrendingApiError } from '@/lib/types'
 
 // Force Node.js runtime instead of Edge for Buffer/OAuth2 support
 export const runtime = 'nodejs'
-
-class TrendingApiError extends Error {
-  constructor(message: string, public code: string) {
-    super(message)
-    this.name = 'TrendingApiError'
-  }
-}
 
 interface RedditPost {
   id: string

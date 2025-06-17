@@ -11,6 +11,7 @@ interface RedditPost {
   author: string
   upvote_ratio: number
   posted_date: string
+  selftext?: string
 }
 
 export function useClientReddit(subreddit: string, limit: number = 10) {
@@ -55,7 +56,8 @@ export function useClientReddit(subreddit: string, limit: number = 10) {
               permalink: `https://reddit.com${post.data.permalink}`,
               author: post.data.author,
               upvote_ratio: post.data.upvote_ratio || 0,
-              posted_date: new Date(post.data.created_utc * 1000).toISOString()
+              posted_date: new Date(post.data.created_utc * 1000).toISOString(),
+              selftext: post.data.selftext || undefined
             }))
             .sort((a: RedditPost, b: RedditPost) => b.score - a.score)
 
