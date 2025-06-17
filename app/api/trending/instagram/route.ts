@@ -3,6 +3,7 @@ import { TrendingResponse, InstagramPost } from '@/lib/types'
 import { getEngagementLabel, getEngagementColor, runApifyActor } from '@/lib/api-utils'
 
 // ====== CONFIGURATION ======
+// Updated: Removed all file system logging to fix Vercel production issues
 const APIFY_TOKEN = process.env.APIFY_API_TOKEN // <-- Set this in your .env.local
 const APIFY_INSTAGRAM_HASHTAG_ACTOR = 'apify/instagram-scraper'
 const APIFY_INSTAGRAM_PROFILE_ACTOR = 'apify/instagram-profile-scraper'
