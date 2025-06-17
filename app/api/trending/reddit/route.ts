@@ -64,7 +64,7 @@ async function getRedditAccessToken(): Promise<string> {
       headers: {
         'Authorization': `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
         'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'TrendingTopicTracker/1.0 (by /u/TrendingBot)'
+        'User-Agent': 'web:TrendingTopicTracker:v1.0.0 (by /u/TrendingBot)'
       },
       body: 'grant_type=client_credentials'
     })
@@ -99,7 +99,7 @@ async function getRedditAccessToken(): Promise<string> {
 async function makeRedditRequest(
   endpoint: string,
   params?: Record<string, any>,
-  timeout: number = 10000
+  timeout: number = 30000
 ): Promise<any> {
   try {
     const accessToken = await getRedditAccessToken()
@@ -121,7 +121,7 @@ async function makeRedditRequest(
     const response = await fetch(url.toString(), {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'User-Agent': 'TrendingTopicTracker/1.0 (by /u/TrendingBot)',
+        'User-Agent': 'web:TrendingTopicTracker:v1.0.0 (by /u/TrendingBot)',
         'Accept': 'application/json'
       },
       signal: controller.signal
