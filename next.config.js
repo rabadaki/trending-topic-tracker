@@ -6,10 +6,6 @@ const nextConfig = {
     // Generate unique build ID to force cache invalidation
     return 'build-' + Date.now()
   },
-  experimental: {
-    // Disable build cache
-    isrMemoryCacheSize: 0,
-  },
   // Force rebuild of API routes
   webpack: (config, { isServer }) => {
     if (isServer) {
