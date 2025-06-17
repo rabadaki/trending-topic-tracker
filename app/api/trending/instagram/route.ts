@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { TrendingResponse, InstagramPost } from '@/lib/types'
 import { getEngagementLabel, getEngagementColor, runApifyActor } from '@/lib/api-utils'
-import fs from 'fs'
-import path from 'path'
 
 // ====== CONFIGURATION ======
 const APIFY_TOKEN = process.env.APIFY_API_TOKEN // <-- Set this in your .env.local
@@ -64,20 +62,13 @@ interface ApifyInstagramHashtag {
  * Filters, sorts, and maps posts to internal format.
  */
 async function fetchFromApify(actorId: string, input: any, limit: number, searchQuery: string): Promise<{ posts: InstagramPost[], hashtags: ApifyInstagramHashtag[] }> {
-  const logPath = path.join(process.cwd(), 'logs', 'instagram-debug.log')
-  function logToFile(msg: string) {
-    fs.mkdirSync(path.dirname(logPath), { recursive: true })
-    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`)
-  }
-  
   // Use the same working Apify pattern as Twitter/TikTok
   const timeout = 60 * 1000; // 60 seconds
   const runRes = await runApifyActor(actorId, input, { timeout })
   const items: ApifyInstagramHashtag[] = runRes
   
-  logToFile(`Apify response status: success`)
-  logToFile(`Apify response body: ${JSON.stringify(items).substring(0, 1000)}...`)
-  logToFile(`Apify raw items count: ${Array.isArray(items) ? items.length : 'not array'}`)
+  console.log(`[Instagram] Apify response status: success`)
+  console.log(`[Instagram] Apify raw items count: ${Array.isArray(items) ? items.length : 'not array'}`)
   // 1. Extract all nested posts from all hashtags
   const allPosts: ApifyInstagramPost[] = []
   
@@ -101,14 +92,14 @@ async function fetchFromApify(actorId: string, input: any, limit: number, search
     }
   }
   
-  logToFile(`Extracted allPosts count: ${allPosts.length}`)
+  console.log(`[Instagram] Extracted allPosts count: ${allPosts.length}`)
   // 2. Shortlist trending posts (recent + high engagement)
   const now = Date.now()
   const recentPosts = allPosts.filter(post => {
     const postTime = new Date(post.timestamp || post.date || '').getTime()
     return (now - postTime) < 48 * 60 * 60 * 1000 // last 48h
   })
-  logToFile(`Recent posts (last 48h) count: ${recentPosts.length}`)
+  console.log(`[Instagram] Recent posts (last 48h) count: ${recentPosts.length}`)
   recentPosts.forEach(post => {
     // Calculate engagement as likes + comments
     (post as any).engagement = (post.likesCount || post.likeCount || 0) + (post.commentsCount || post.commentCount || 0)
@@ -118,7 +109,7 @@ async function fetchFromApify(actorId: string, input: any, limit: number, search
   const top50pctIndex = Math.ceil(sorted.length * 0.5)
   const maxTrending = Math.min(top50pctIndex, limit * 2) // At least double the requested limit
   const shortlisted = sorted.slice(0, maxTrending)
-  logToFile(`Shortlisted trending posts count: ${shortlisted.length}`)
+  console.log(`[Instagram] Shortlisted trending posts count: ${shortlisted.length}`)
   // 3. Calculate trending hashtags by recent post count (last 24h)
   const hashtagsWithTrending = items.map((h) => {
     const posts = [...(h.topPosts || []), ...(h.latestPosts || [])]
@@ -157,10 +148,10 @@ async function fetchFromApify(actorId: string, input: any, limit: number, search
       hashtags,
       posted_date: dateStr ? new Date(dateStr).toISOString() : new Date().toISOString(),
     }
-    logToFile(`Mapped post: ${JSON.stringify(mapped).substring(0, 300)}...`)
+    console.log(`[Instagram] Mapped post: ${JSON.stringify(mapped).substring(0, 300)}...`)
     return mapped
   })
-  logToFile(`Final posts returned count: ${posts.length}`)
+  console.log(`[Instagram] Final posts returned count: ${posts.length}`)
   return { posts, hashtags: hashtagsFinal }
 }
 
