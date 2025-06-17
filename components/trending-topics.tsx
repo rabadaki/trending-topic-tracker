@@ -110,7 +110,8 @@ export function TrendingTopics() {
   const { 
     posts: redditPosts, 
     loading: redditLoading, 
-    error: redditError 
+    error: redditError,
+    refresh: refreshReddit
   } = useClientReddit(primarySubreddit, 10)
   
   const [twitterData, setTwitterData] = useState<any>(null)
@@ -126,11 +127,17 @@ export function TrendingTopics() {
   const [instagramError, setInstagramError] = useState<string | null>(null)
   
   // Manual refetch functions
-  const refetchReddit = () => {
-    // Client-side Reddit hook handles automatic refetching
-    // This function exists for compatibility but hook handles the refresh
-    setLastScanTime(new Date().toISOString())
-    console.log('🔍 Reddit refetch requested - handled by client-side hook')
+  const refetchReddit = async () => {
+    // Use the refresh function from the client-side Reddit hook
+    try {
+      console.log('🔍 Manual Reddit refetch requested')
+      refreshReddit()
+      setLastScanTime(new Date().toISOString())
+      return { success: true }
+    } catch (error) {
+      console.error('❌ Reddit refetch error:', error)
+      throw error
+    }
   }
   
   const refetchTwitter = async () => {
@@ -645,8 +652,8 @@ export function TrendingTopics() {
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                          <Badge className={getEngagementColor(Number(trend.likes) || 0, 'tiktok')}>
-                            {getEngagementLabel(Number(trend.likes) || 0, 'tiktok')}
+                          <Badge className={getEngagementColor(trend.raw_views || 0, 'tiktok')}>
+                            {getEngagementLabel(trend.raw_views || 0, 'tiktok')}
                       </Badge>
                           {trend.video_url && (
                             <Button variant="ghost" size="sm" asChild>

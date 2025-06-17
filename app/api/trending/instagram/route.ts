@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { TrendingResponse, InstagramPost } from '@/lib/types'
-import { getEngagementLabel, getEngagementColor } from '@/lib/api-utils'
+import { getEngagementLabel, getEngagementColor, runApifyActor } from '@/lib/api-utils'
 import fs from 'fs'
 import path from 'path'
 
 // ====== CONFIGURATION ======
 const APIFY_TOKEN = process.env.APIFY_API_TOKEN // <-- Set this in your .env.local
-const APIFY_INSTAGRAM_HASHTAG_ACTOR = 'shu8hvrXbJbY3Eb9W'
+const APIFY_INSTAGRAM_HASHTAG_ACTOR = 'apify/instagram-scraper'
 const APIFY_INSTAGRAM_PROFILE_ACTOR = 'apify/instagram-profile-scraper'
 
 // ====== DEMO FALLBACK DATA ======
@@ -63,39 +63,44 @@ interface ApifyInstagramHashtag {
  * Handles both hashtag and user profile queries.
  * Filters, sorts, and maps posts to internal format.
  */
-async function fetchFromApify(actorId: string, input: any, limit: number): Promise<{ posts: InstagramPost[], hashtags: ApifyInstagramHashtag[] }> {
+async function fetchFromApify(actorId: string, input: any, limit: number, searchQuery: string): Promise<{ posts: InstagramPost[], hashtags: ApifyInstagramHashtag[] }> {
   const logPath = path.join(process.cwd(), 'logs', 'instagram-debug.log')
   function logToFile(msg: string) {
     fs.mkdirSync(path.dirname(logPath), { recursive: true })
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`)
   }
-  const runUrl = `https://api.apify.com/v2/acts/${actorId}/run-sync-get-dataset-items?token=${APIFY_TOKEN}`
-  const runRes = await fetch(runUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input)
-  })
-  // Log status and response body for debugging
-  const status = runRes.status;
-  const rawText = await runRes.clone().text();
-  logToFile(`Apify response status: ${status}`)
-  logToFile(`Apify response body: ${rawText.substring(0, 1000)}...`)
-
-  if (status >= 400) {
-    throw new Error('Failed to start Apify actor: ' + rawText);
-  }
-  const items: ApifyInstagramHashtag[] = await runRes.json()
+  
+  // Use the same working Apify pattern as Twitter/TikTok
+  const timeout = 60 * 1000; // 60 seconds
+  const runRes = await runApifyActor(actorId, input, { timeout })
+  const items: ApifyInstagramHashtag[] = runRes
+  
+  logToFile(`Apify response status: success`)
+  logToFile(`Apify response body: ${JSON.stringify(items).substring(0, 1000)}...`)
   logToFile(`Apify raw items count: ${Array.isArray(items) ? items.length : 'not array'}`)
   // 1. Extract all nested posts from all hashtags
   const allPosts: ApifyInstagramPost[] = []
-  for (const hashtagObj of items) {
-    if (Array.isArray(hashtagObj.topPosts)) {
-      allPosts.push(...hashtagObj.topPosts.map((post) => ({ ...post, hashtag: hashtagObj.id })))
-    }
-    if (Array.isArray(hashtagObj.latestPosts)) {
-      allPosts.push(...hashtagObj.latestPosts.map((post) => ({ ...post, hashtag: hashtagObj.id })))
+  
+  if (Array.isArray(items) && items.length > 0) {
+    const firstItem = items[0];
+    
+    // Check if this is nested hashtag structure (search-based)
+    if (firstItem.topPosts || firstItem.latestPosts) {
+      // Nested structure from search-based approach
+      for (const hashtagObj of items) {
+        if (Array.isArray(hashtagObj.topPosts)) {
+          allPosts.push(...hashtagObj.topPosts.map((post) => ({ ...post, hashtag: hashtagObj.id })))
+        }
+        if (Array.isArray(hashtagObj.latestPosts)) {
+          allPosts.push(...hashtagObj.latestPosts.map((post) => ({ ...post, hashtag: hashtagObj.id })))
+        }
+      }
+    } else {
+      // Direct posts structure (directUrls approach)
+      allPosts.push(...items.map((post) => ({ ...post, hashtag: searchQuery })))
     }
   }
+  
   logToFile(`Extracted allPosts count: ${allPosts.length}`)
   // 2. Shortlist trending posts (recent + high engagement)
   const now = Date.now()
@@ -109,8 +114,10 @@ async function fetchFromApify(actorId: string, input: any, limit: number): Promi
     (post as any).engagement = (post.likesCount || post.likeCount || 0) + (post.commentsCount || post.commentCount || 0)
   })
   const sorted = recentPosts.sort((a: any, b: any) => b.engagement - a.engagement)
-  const top10pctIndex = Math.ceil(sorted.length * 0.1)
-  const shortlisted = sorted.slice(0, top10pctIndex)
+  // Use top 50% of recent posts or requested limit, whichever is smaller
+  const top50pctIndex = Math.ceil(sorted.length * 0.5)
+  const maxTrending = Math.min(top50pctIndex, limit * 2) // At least double the requested limit
+  const shortlisted = sorted.slice(0, maxTrending)
   logToFile(`Shortlisted trending posts count: ${shortlisted.length}`)
   // 3. Calculate trending hashtags by recent post count (last 24h)
   const hashtagsWithTrending = items.map((h) => {
@@ -190,16 +197,18 @@ export async function GET(req: NextRequest) {
         isUserTaggedFeedURL: false
       }
     } else {
-      // Hashtag search
+      // Hashtag search - revert to search-based with limits
       const hashtag = query.replace('#', '')
       apifyInput = {
         search: hashtag,
         searchType: 'hashtag',
-        resultsLimit: limit,
-        resultsType: 'posts'
+        resultsType: 'posts',
+        resultsLimit: 10, // Fixed cap to prevent timeouts
+        searchLimit: 1,
+        addParentData: false
       }
     }
-    const result = await fetchFromApify(actorId, apifyInput, limit)
+    const result = await fetchFromApify(actorId, apifyInput, limit, query)
     posts = result.posts
     hashtags = result.hashtags
     if (!posts.length) throw new Error('No posts found')

@@ -42,10 +42,11 @@ export function validateLimit(limit: number, max: number = 50): number {
  */
 export function getEngagementLabel(value: number, platform: string): string {
   const thresholds = {
-    reddit: { viral: 5000, high: 500, medium: 50 },
-    twitter: { viral: 10000, high: 1000, medium: 100 },
-    tiktok: { viral: 1000000, high: 100000, medium: 10000 },
-    instagram: { viral: 50000, high: 5000, medium: 500 }
+    reddit: { viral: 1000, high: 500, medium: 100 },
+    twitter: { viral: 5000, high: 1000, medium: 100 },
+    tiktok: { viral: 10000, high: 5000, medium: 1000 },
+    instagram: { viral: 10000, high: 5000, medium: 1000 },
+    default: { viral: 1000, high: 500, medium: 100 }
   }
   
   const platformThresholds = thresholds[platform as keyof typeof thresholds]
@@ -61,6 +62,17 @@ export function getEngagementLabel(value: number, platform: string): string {
  * Returns color code for engagement level
  */
 export function getEngagementColor(value: number, platform: string): string {
+  const thresholds = {
+    reddit: { viral: 1000, high: 500, medium: 100 },
+    twitter: { viral: 5000, high: 1000, medium: 100 },
+    tiktok: { viral: 10000, high: 5000, medium: 1000 },
+    instagram: { viral: 10000, high: 5000, medium: 1000 },
+    default: { viral: 1000, high: 500, medium: 100 }
+  }
+  
+  const platformThresholds = thresholds[platform as keyof typeof thresholds]
+  if (!platformThresholds) return '#888888'
+  
   const level = getEngagementLabel(value, platform)
   const colors = {
     'Viral': '#ff4444',
