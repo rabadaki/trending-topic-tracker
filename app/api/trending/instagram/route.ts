@@ -3,7 +3,7 @@ import { TrendingResponse, InstagramPost } from '@/lib/types'
 import { getEngagementLabel, getEngagementColor, runApifyActor } from '@/lib/api-utils'
 
 // ====== CONFIGURATION ======
-// Build timestamp: 2025-01-20T21:15:00Z - REVERT to original working input format with 'search' parameter
+// Build timestamp: 2025-01-20T21:30:00Z - FORCE FRESH DEPLOYMENT - Remove all file operations
 // NO FILE SYSTEM OPERATIONS - VERCEL READ-ONLY ENVIRONMENT
 const APIFY_TOKEN = process.env.APIFY_API_TOKEN
 const APIFY_INSTAGRAM_HASHTAG_ACTOR = 'apify/instagram-scraper'
