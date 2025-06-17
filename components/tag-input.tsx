@@ -7,13 +7,17 @@ import { Input } from "@/components/ui/input"
 
 interface TagInputProps {
   defaultValue?: string[]
+  value?: string[]
   placeholder?: string
   onChange?: (tags: string[]) => void
 }
 
-export function TagInput({ defaultValue = [], placeholder = "Add tag...", onChange }: TagInputProps) {
-  const [tags, setTags] = useState<string[]>(defaultValue)
+export function TagInput({ defaultValue = [], value, placeholder = "Add tag...", onChange }: TagInputProps) {
+  const [internalTags, setInternalTags] = useState<string[]>(defaultValue)
   const [inputValue, setInputValue] = useState("")
+  
+  // Use controlled value if provided, otherwise use internal state
+  const tags = value !== undefined ? value : internalTags
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if ((e.key === "Enter" || e.key === ",") && inputValue.trim()) {
@@ -21,7 +25,9 @@ export function TagInput({ defaultValue = [], placeholder = "Add tag...", onChan
       const newTag = inputValue.trim()
       if (!tags.includes(newTag)) {
         const newTags = [...tags, newTag]
-        setTags(newTags)
+        if (value === undefined) {
+          setInternalTags(newTags)
+        }
         onChange?.(newTags)
       }
       setInputValue("")
@@ -30,7 +36,9 @@ export function TagInput({ defaultValue = [], placeholder = "Add tag...", onChan
 
   const removeTag = (tagToRemove: string) => {
     const newTags = tags.filter((tag) => tag !== tagToRemove)
-    setTags(newTags)
+    if (value === undefined) {
+      setInternalTags(newTags)
+    }
     onChange?.(newTags)
   }
 
@@ -57,7 +65,6 @@ export function TagInput({ defaultValue = [], placeholder = "Add tag...", onChan
         placeholder={placeholder}
         className="w-full"
       />
-      <p className="text-xs text-gray-500 mt-1">Press Enter or comma to add</p>
     </div>
   )
 }

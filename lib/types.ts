@@ -16,27 +16,38 @@ export interface RedditPost {
   selftext: string
   thumbnail?: string
   domain?: string
+  engagement_level: string
+  engagement_color: string
+  posted_date: string
 }
 
 export interface TwitterTrend {
   name: string
   volume: number
-  growth: string
   tweet_volume?: number
   url?: string
+  engagement_level: string
+  engagement_color: string
   promoted_content?: null
+  posted_date: string
 }
 
 export interface TikTokTrend {
   title: string
   views: string
   likes: string
-  growth: string
   hashtags?: string[]
   video_url?: string
   author?: string
   description?: string
+  engagement_level: string
+  engagement_color: string
+  raw_views: number
+  raw_likes: number
+  posted_date: string
 }
+
+// InstagramPost interface moved to API response types section below
 
 export interface ContentIdea {
   format: string
@@ -47,6 +58,21 @@ export interface ContentIdea {
   word_count?: string
   engagement?: string
   tags: string[]
+  // New streamlined prompt fields
+  content_type?: string
+  engagement_strategy?: string
+  // Platform-specific optimization fields
+  thumbnail_concept?: string
+  seo_keywords?: string[]
+  visual_concept?: string
+  trend_element?: string
+  tweet_count?: string
+  thread_structure?: string
+  format_type?: string
+  hashtag_strategy?: string
+  seo_strategy?: string
+  content_structure?: string
+  platform_adaptations?: string
 }
 
 // ============================================================================
@@ -60,10 +86,28 @@ export interface ApiResponse<T = any> {
   timestamp: string
 }
 
+export interface InstagramPost {
+  id: string
+  caption: string
+  media_type: 'IMAGE' | 'VIDEO' | 'CAROUSEL_ALBUM'
+  media_url?: string
+  permalink: string
+  timestamp?: string
+  like_count: number
+  comments_count: number
+  hashtags?: string[]
+  username: string
+  engagement_level: string
+  engagement_color: string
+  raw_engagement: number
+  posted_date: string
+}
+
 export interface TrendingResponse {
-  platform: 'reddit' | 'twitter' | 'tiktok'
+  platform: 'reddit' | 'twitter' | 'tiktok' | 'instagram'
   posts?: RedditPost[]
   trends?: TwitterTrend[] | TikTokTrend[]
+  media?: InstagramPost[]
   count: number
   timestamp: string
   query?: string
@@ -71,6 +115,7 @@ export interface TrendingResponse {
   sort?: string
   time_period?: string
   location?: string
+  hashtag?: string
 }
 
 export interface ContentGenerationResponse {
@@ -116,6 +161,73 @@ export interface ApifyTikTokInput {
   searchQueries?: string[]
   resultsPerPage?: number
   shouldDownloadVideos?: boolean
+}
+
+/**
+ * Type for Apify Twitter post response item
+ */
+export interface ApifyTwitterPost {
+  id?: string;
+  text?: string;
+  createdAt?: string;
+  timestamp_ms?: string;
+  created_at?: string;
+  replyCount?: number;
+  retweetCount?: number;
+  likeCount?: number;
+  favoriteCount?: number;
+  user?: {
+    screen_name?: string;
+    name?: string;
+    followers_count?: number;
+  };
+  author?: {
+    username?: string;
+    name?: string;
+  };
+  hashtags?: string[];
+  url?: string;
+  permalink?: string;
+  isRetweet?: boolean;
+  isReply?: boolean;
+}
+
+/**
+ * Type for Apify TikTok post response item
+ */
+export interface ApifyTikTokPost {
+  id?: string;
+  text?: string;
+  description?: string;
+  title?: string;
+  createTime?: number;
+  timestamp?: string;
+  playCount?: number;
+  diggCount?: number;
+  shareCount?: number;
+  commentCount?: number;
+  webVideoUrl?: string;
+  playAddr?: string;
+  authorMeta?: {
+    name?: string;
+    nickname?: string;
+    id?: string;
+  };
+  author?: string;
+  hashtags?: Array<{
+    name?: string;
+    id?: string;
+  }>;
+  musicMeta?: {
+    musicName?: string;
+    musicAuthor?: string;
+  };
+  covers?: string[];
+  videoMeta?: {
+    width?: number;
+    height?: number;
+    duration?: number;
+  };
 }
 
 // ============================================================================

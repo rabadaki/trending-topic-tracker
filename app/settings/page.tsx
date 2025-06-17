@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,14 +12,51 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { Bell, User, CreditCard, Shield, Palette, TrendingUp } from "lucide-react"
 import { TagInput } from "@/components/tag-input"
+import { MonitoringSettings, getMonitoringSettings, saveMonitoringSettings, DEFAULT_MONITORING_SETTINGS, migrateAndValidateSettings } from "@/lib/settings-utils"
+import { useToast } from "@/hooks/use-toast"
 
 export default function SettingsPage() {
+  const { toast } = useToast()
+  
   const [notifications, setNotifications] = useState({
     trending: true,
     contentGenerated: true,
     weeklyReport: false,
     marketing: false,
   })
+
+  const [monitoringSettings, setMonitoringSettings] = useState<MonitoringSettings>(DEFAULT_MONITORING_SETTINGS)
+  const [isSaving, setIsSaving] = useState(false)
+
+  // Load and migrate settings on component mount
+  useEffect(() => {
+    const migratedSettings = migrateAndValidateSettings()
+    setMonitoringSettings(migratedSettings)
+  }, [])
+
+  // Save monitoring settings
+  const handleSaveMonitoring = async () => {
+    setIsSaving(true)
+    try {
+      saveMonitoringSettings(monitoringSettings)
+      toast({
+        title: "Settings saved! ✅",
+        description: "Your monitoring settings have been successfully updated.",
+        duration: 3000,
+      })
+      console.log('Monitoring settings saved successfully')
+    } catch (error) {
+      console.error('Failed to save monitoring settings:', error)
+      toast({
+        title: "Error saving settings ❌",
+        description: "There was a problem saving your settings. Please try again.",
+        variant: "destructive",
+        duration: 4000,
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -348,39 +385,61 @@ export default function SettingsPage() {
                   </CardHeader>
                   <CardContent className="space-y-6">
                     <Tabs defaultValue="reddit" className="w-full">
-                      <TabsList className="grid w-full grid-cols-3">
+                      <TabsList className="grid w-full grid-cols-4">
                         <TabsTrigger value="reddit">Reddit</TabsTrigger>
                         <TabsTrigger value="twitter">Twitter</TabsTrigger>
                         <TabsTrigger value="tiktok">TikTok</TabsTrigger>
+                        <TabsTrigger value="instagram">Instagram</TabsTrigger>
                       </TabsList>
 
                       <TabsContent value="reddit" className="space-y-4">
                         <div className="space-y-4">
                           <div className="space-y-2">
-                            <Label htmlFor="subreddits">Subreddits to Monitor</Label>
+                            <Label htmlFor="subreddits">Subreddits to Monitor (Max 3)</Label>
                             <TagInput
-                              defaultValue={["artificial", "productivity", "entrepreneur", "socialmedia", "marketing"]}
-                              placeholder="Add subreddit..."
+                              value={monitoringSettings.reddit.subreddits}
+                              onChange={(values) => setMonitoringSettings(prev => ({
+                                ...prev,
+                                reddit: { ...prev.reddit, subreddits: values.slice(0, 3) }
+                              }))}
+                              placeholder="Add subreddit"
                             />
-                            <p className="text-sm text-gray-600">Monitor specific subreddits for trending posts</p>
                           </div>
 
                           <div className="space-y-2">
-                            <Label htmlFor="reddit-keywords">Keywords</Label>
+                            <Label htmlFor="reddit-keywords">Keywords (Max 3)</Label>
                             <TagInput
-                              defaultValue={["AI tools", "content creation", "remote work", "productivity hacks"]}
-                              placeholder="Add keyword..."
+                              value={monitoringSettings.reddit.keywords}
+                              onChange={(values) => setMonitoringSettings(prev => ({
+                                ...prev,
+                                reddit: { ...prev.reddit, keywords: values.slice(0, 3) }
+                              }))}
+                              placeholder="Add keyword"
                             />
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
                               <Label htmlFor="reddit-min-upvotes">Minimum Upvotes</Label>
-                              <Input id="reddit-min-upvotes" type="number" defaultValue="100" />
+                              <Input 
+                                id="reddit-min-upvotes" 
+                                type="number" 
+                                value={monitoringSettings.reddit.minUpvotes}
+                                onChange={(e) => setMonitoringSettings(prev => ({
+                                  ...prev,
+                                  reddit: { ...prev.reddit, minUpvotes: parseInt(e.target.value) || 0 }
+                                }))}
+                              />
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="reddit-timeframe">Time Frame</Label>
-                              <Select defaultValue="24h">
+                              <Select 
+                                value={monitoringSettings.reddit.timeframe}
+                                onValueChange={(value: '1h' | '24h' | '7d' | '30d') => setMonitoringSettings(prev => ({
+                                  ...prev,
+                                  reddit: { ...prev.reddit, timeframe: value }
+                                }))}
+                              >
                                 <SelectTrigger>
                                   <SelectValue />
                                 </SelectTrigger>
@@ -399,35 +458,51 @@ export default function SettingsPage() {
                       <TabsContent value="twitter" className="space-y-4">
                         <div className="space-y-4">
                           <div className="space-y-2">
-                            <Label htmlFor="twitter-hashtags">Hashtags to Monitor</Label>
+                            <Label htmlFor="twitter-search-terms">Search Terms to Monitor (Max 3)</Label>
                             <TagInput
-                              defaultValue={[
-                                "AIRevolution",
-                                "CreatorEconomy",
-                                "TechTrends",
-                                "ContentCreation",
-                                "DigitalMarketing",
-                              ]}
-                              placeholder="Add hashtag (without #)..."
-                            />
-                          </div>
+                              value={monitoringSettings.twitter.searchTerms}
+                              onChange={(values) => setMonitoringSettings(prev => ({
+                                ...prev,
+                                twitter: { ...prev.twitter, searchTerms: values.slice(0, 3) }
+                              }))}
+                              placeholder="Add search term"
+                                              />
+                </div>
 
                           <div className="space-y-2">
-                            <Label htmlFor="twitter-accounts">Accounts to Monitor</Label>
+                            <Label htmlFor="twitter-accounts">Accounts to Monitor (Max 3)</Label>
                             <TagInput
-                              defaultValue={["elonmusk", "sundarpichai", "satyanadella"]}
-                              placeholder="Add account (without @)..."
+                              value={monitoringSettings.twitter.accounts}
+                              onChange={(values) => setMonitoringSettings(prev => ({
+                                ...prev,
+                                twitter: { ...prev.twitter, accounts: values.slice(0, 3) }
+                              }))}
+                              placeholder="Add account (without @)"
                             />
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
                               <Label htmlFor="twitter-min-engagement">Minimum Engagement</Label>
-                              <Input id="twitter-min-engagement" type="number" defaultValue="1000" />
+                              <Input 
+                                id="twitter-min-engagement" 
+                                type="number" 
+                                value={monitoringSettings.twitter.minEngagement}
+                                onChange={(e) => setMonitoringSettings(prev => ({
+                                  ...prev,
+                                  twitter: { ...prev.twitter, minEngagement: parseInt(e.target.value) || 0 }
+                                }))}
+                              />
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="twitter-language">Language</Label>
-                              <Select defaultValue="en">
+                              <Select 
+                                value={monitoringSettings.twitter.language}
+                                onValueChange={(value) => setMonitoringSettings(prev => ({
+                                  ...prev,
+                                  twitter: { ...prev.twitter, language: value }
+                                }))}
+                              >
                                 <SelectTrigger>
                                   <SelectValue />
                                 </SelectTrigger>
@@ -446,41 +521,172 @@ export default function SettingsPage() {
                       <TabsContent value="tiktok" className="space-y-4">
                         <div className="space-y-4">
                           <div className="space-y-2">
-                            <Label htmlFor="tiktok-hashtags">TikTok Hashtags</Label>
+                            <Label htmlFor="tiktok-hashtags">TikTok Hashtags (Max 3)</Label>
                             <TagInput
-                              defaultValue={[
-                                "productivity",
-                                "morningroutine",
-                                "contentcreator",
-                                "smallbusiness",
-                                "entrepreneur",
-                              ]}
-                              placeholder="Add hashtag (without #)..."
+                              value={monitoringSettings.tiktok.hashtags}
+                              onChange={(values) => setMonitoringSettings(prev => ({
+                                ...prev,
+                                tiktok: { ...prev.tiktok, hashtags: values.slice(0, 3) }
+                              }))}
+                              placeholder="Add hashtag (without #)"
                             />
                           </div>
 
                           <div className="space-y-2">
                             <Label htmlFor="tiktok-sounds">Trending Sounds</Label>
-                            <Switch />
+                            <Switch 
+                              checked={monitoringSettings.tiktok.trending_sounds}
+                              onCheckedChange={(checked) => setMonitoringSettings(prev => ({
+                                ...prev,
+                                tiktok: { ...prev.tiktok, trending_sounds: checked }
+                              }))}
+                            />
                             <p className="text-sm text-gray-600">Monitor trending audio and music</p>
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
                               <Label htmlFor="tiktok-min-views">Minimum Views</Label>
-                              <Input id="tiktok-min-views" type="number" defaultValue="10000" />
+                              <Input 
+                                id="tiktok-min-views" 
+                                type="number" 
+                                value={monitoringSettings.tiktok.minViews}
+                                onChange={(e) => setMonitoringSettings(prev => ({
+                                  ...prev,
+                                  tiktok: { ...prev.tiktok, minViews: parseInt(e.target.value) || 0 }
+                                }))}
+                              />
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="tiktok-region">Region</Label>
-                              <Select defaultValue="us">
+                              <Select 
+                                value={monitoringSettings.tiktok.region}
+                                onValueChange={(value) => setMonitoringSettings(prev => ({
+                                  ...prev,
+                                  tiktok: { ...prev.tiktok, region: value }
+                                }))}
+                              >
                                 <SelectTrigger>
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="us">United States</SelectItem>
-                                  <SelectItem value="uk">United Kingdom</SelectItem>
-                                  <SelectItem value="ca">Canada</SelectItem>
-                                  <SelectItem value="au">Australia</SelectItem>
+                                  {/* North America */}
+                                  <SelectItem value="us">🇺🇸 United States</SelectItem>
+                                  <SelectItem value="ca">🇨🇦 Canada</SelectItem>
+                                  <SelectItem value="mx">🇲🇽 Mexico</SelectItem>
+                                  
+                                  {/* Europe */}
+                                  <SelectItem value="uk">🇬🇧 United Kingdom</SelectItem>
+                                  <SelectItem value="de">🇩🇪 Germany</SelectItem>
+                                  <SelectItem value="fr">🇫🇷 France</SelectItem>
+                                  <SelectItem value="it">🇮🇹 Italy</SelectItem>
+                                  <SelectItem value="es">🇪🇸 Spain</SelectItem>
+                                  <SelectItem value="nl">🇳🇱 Netherlands</SelectItem>
+                                  <SelectItem value="se">🇸🇪 Sweden</SelectItem>
+                                  <SelectItem value="no">🇳🇴 Norway</SelectItem>
+                                  <SelectItem value="dk">🇩🇰 Denmark</SelectItem>
+                                  <SelectItem value="fi">🇫🇮 Finland</SelectItem>
+                                  <SelectItem value="pl">🇵🇱 Poland</SelectItem>
+                                  <SelectItem value="ru">🇷🇺 Russia</SelectItem>
+                                  
+                                  {/* Asia Pacific */}
+                                  <SelectItem value="jp">🇯🇵 Japan</SelectItem>
+                                  <SelectItem value="kr">🇰🇷 South Korea</SelectItem>
+                                  <SelectItem value="cn">🇨🇳 China</SelectItem>
+                                  <SelectItem value="in">🇮🇳 India</SelectItem>
+                                  <SelectItem value="id">🇮🇩 Indonesia</SelectItem>
+                                  <SelectItem value="th">🇹🇭 Thailand</SelectItem>
+                                  <SelectItem value="vn">🇻🇳 Vietnam</SelectItem>
+                                  <SelectItem value="ph">🇵🇭 Philippines</SelectItem>
+                                  <SelectItem value="my">🇲🇾 Malaysia</SelectItem>
+                                  <SelectItem value="sg">🇸🇬 Singapore</SelectItem>
+                                  <SelectItem value="au">🇦🇺 Australia</SelectItem>
+                                  <SelectItem value="nz">🇳🇿 New Zealand</SelectItem>
+                                  
+                                  {/* Middle East & Africa */}
+                                  <SelectItem value="ae">🇦🇪 UAE</SelectItem>
+                                  <SelectItem value="sa">🇸🇦 Saudi Arabia</SelectItem>
+                                  <SelectItem value="eg">🇪🇬 Egypt</SelectItem>
+                                  <SelectItem value="za">🇿🇦 South Africa</SelectItem>
+                                  <SelectItem value="ng">🇳🇬 Nigeria</SelectItem>
+                                  <SelectItem value="ke">🇰🇪 Kenya</SelectItem>
+                                  
+                                  {/* Latin America */}
+                                  <SelectItem value="br">🇧🇷 Brazil</SelectItem>
+                                  <SelectItem value="ar">🇦🇷 Argentina</SelectItem>
+                                  <SelectItem value="cl">🇨🇱 Chile</SelectItem>
+                                  <SelectItem value="co">🇨🇴 Colombia</SelectItem>
+                                  <SelectItem value="pe">🇵🇪 Peru</SelectItem>
+                                  
+                                  {/* Global/Worldwide */}
+                                  <SelectItem value="global">🌍 Global/Worldwide</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="instagram" className="space-y-4">
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="instagram-hashtags">Instagram Hashtags (Max 3)</Label>
+                            <TagInput
+                              value={monitoringSettings.instagram.hashtags}
+                              onChange={(values) => setMonitoringSettings(prev => ({
+                                ...prev,
+                                instagram: { ...prev.instagram, hashtags: values.slice(0, 3) }
+                              }))}
+                              placeholder="Add hashtag (without #)"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="instagram-accounts">Accounts to Monitor (Max 3)</Label>
+                            <TagInput
+                              value={monitoringSettings.instagram.accounts}
+                              onChange={(values) => setMonitoringSettings(prev => ({
+                                ...prev,
+                                instagram: { ...prev.instagram, accounts: values.slice(0, 3) }
+                              }))}
+                              placeholder="Add account (without @)"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="instagram-min-likes">Minimum Likes</Label>
+                              <Input 
+                                id="instagram-min-likes" 
+                                type="number" 
+                                value={monitoringSettings.instagram.minLikes}
+                                onChange={(e) => setMonitoringSettings(prev => ({
+                                  ...prev,
+                                  instagram: { ...prev.instagram, minLikes: parseInt(e.target.value) || 0 }
+                                }))}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="instagram-content-types">Content Types</Label>
+                              <Select 
+                                value={monitoringSettings.instagram.contentTypes.join(',')}
+                                onValueChange={(value) => {
+                                  const types = value.split(',').filter(Boolean) as ('photo' | 'video' | 'carousel')[]
+                                  setMonitoringSettings(prev => ({
+                                    ...prev,
+                                    instagram: { ...prev.instagram, contentTypes: types }
+                                  }))
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="photo,video,carousel">All Types</SelectItem>
+                                  <SelectItem value="photo">Photos Only</SelectItem>
+                                  <SelectItem value="video">Videos Only</SelectItem>
+                                  <SelectItem value="carousel">Carousels Only</SelectItem>
+                                  <SelectItem value="photo,video">Photos & Videos</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>
@@ -488,6 +694,16 @@ export default function SettingsPage() {
                         </div>
                       </TabsContent>
                     </Tabs>
+                    
+                    <div className="mt-6 pt-6 border-t">
+                      <Button 
+                        onClick={handleSaveMonitoring}
+                        disabled={isSaving}
+                        className="w-full"
+                      >
+                        {isSaving ? 'Saving...' : 'Save Monitoring Settings'}
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               </div>
