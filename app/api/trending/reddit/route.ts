@@ -62,7 +62,7 @@ async function getRedditAccessToken(): Promise<string> {
     const response = await fetch('https://www.reddit.com/api/v1/access_token', {
       method: 'POST',
       headers: {
-        'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+        'Authorization': `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': 'TrendingTopicTracker/1.0 (by /u/TrendingBot)'
       },
