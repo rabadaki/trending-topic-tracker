@@ -9,9 +9,18 @@ import {
 } from '@/lib/api-utils'
 import { ContentGenerationResponse, ContentIdea, TrendingApiError } from '@/lib/types'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+// Initialize OpenAI only when API key is available
+const getOpenAI = () => {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new TrendingApiError(
+      'OpenAI API key not configured',
+      'MISSING_OPENAI_KEY'
+    )
+  }
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+}
 
 async function generateContent(
   topic: string,
@@ -250,6 +259,7 @@ Focus on trending topic relevance and immediate actionability.`
   try {
     console.log(`Generating content for topic: "${topic}" (${platform}/${format}, ${validatedCount} ideas)`)
     
+    const openai = getOpenAI()
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -406,6 +416,7 @@ Make sure each idea is:
   try {
     console.log(`Generating content (OLD PROMPT) for topic: "${topic}" (${platform}/${format}, ${validatedCount} ideas)`)
     
+    const openai = getOpenAI()
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
