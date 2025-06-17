@@ -3,8 +3,8 @@ import { TrendingResponse, InstagramPost } from '@/lib/types'
 import { getEngagementLabel, getEngagementColor, runApifyActor } from '@/lib/api-utils'
 
 // ====== CONFIGURATION ======
-// DEPLOYMENT SIGNATURE: 2025-01-20-CACHE-BUST-v3
-// CRITICAL: NO FILE SYSTEM OPERATIONS - VERCEL READ-ONLY
+// Build timestamp: 2025-01-20T18:00:00Z - Enhanced error logging for production debugging
+// NO FILE SYSTEM OPERATIONS - VERCEL READ-ONLY ENVIRONMENT
 const APIFY_TOKEN = process.env.APIFY_API_TOKEN
 const APIFY_INSTAGRAM_HASHTAG_ACTOR = 'apify/instagram-scraper'
 const APIFY_INSTAGRAM_PROFILE_ACTOR = 'apify/instagram-profile-scraper'
@@ -21,8 +21,8 @@ const DEMO_INSTAGRAM_POSTS: InstagramPost[] = [
     comments_count: 45,
     username: 'demo_user',
     hashtags: ['productivity', 'demo'],
-    engagement_level: 'Low',
-    engagement_color: '#6b7280',
+    engagement_level: 'Low' as const,
+    engagement_color: '#6b7280' as const,
     raw_engagement: 168,
     posted_date: new Date(Date.now() - 3600000).toISOString()
   }
@@ -126,66 +126,136 @@ async function fetchFromApify(actorId: string, input: any, limit: number, search
 
 // ====== API HANDLER ======
 export async function GET(request: NextRequest) {
-  console.log(`[Instagram] GET handler called: ${request.url}`)
+  const startTime = Date.now()
+  console.log('[Instagram] =================================')
+  console.log('[Instagram] NEW REQUEST STARTED')
+  console.log('[Instagram] URL:', request.url)
+  console.log('[Instagram] Environment check:')
+  console.log('[Instagram] - NODE_ENV:', process.env.NODE_ENV)
+  console.log('[Instagram] - VERCEL:', process.env.VERCEL)
+  console.log('[Instagram] - APIFY_TOKEN exists:', !!APIFY_TOKEN)
+  console.log('[Instagram] - APIFY_TOKEN length:', APIFY_TOKEN?.length || 0)
   
-  // NO FILE OPERATIONS - CONSOLE LOGGING ONLY
   try {
     const { searchParams } = new URL(request.url)
     const hashtag = searchParams.get('hashtag') || 'productivity'
-    const limit = Math.min(parseInt(searchParams.get('limit') || '10'), 20)
+    const limit = parseInt(searchParams.get('limit') || '10')
     
+    console.log('[Instagram] Parsed params:')
+    console.log('[Instagram] - hashtag:', hashtag)
+    console.log('[Instagram] - limit:', limit)
+
     if (!APIFY_TOKEN) {
-      console.log('[Instagram] No APIFY_TOKEN, falling back to demo data')
-      return NextResponse.json({
-        success: true,
-        data: DEMO_INSTAGRAM_POSTS.slice(0, limit),
-        count: Math.min(DEMO_INSTAGRAM_POSTS.length, limit),
-        timestamp: new Date().toISOString()
-      })
+      console.error('[Instagram] CRITICAL ERROR: APIFY_API_TOKEN is missing!')
+      console.log('[Instagram] Available env vars:', Object.keys(process.env).filter(k => k.includes('APIFY')))
+      throw new Error('APIFY_API_TOKEN environment variable is not set')
     }
-    
-    const input = {
-      hashtags: [hashtag],
-      resultsLimit: 50
-    }
-    
-    const { posts } = await fetchFromApify(
+
+    console.log('[Instagram] About to call runApifyActor with:')
+    console.log('[Instagram] - actor:', APIFY_INSTAGRAM_HASHTAG_ACTOR)
+    console.log('[Instagram] - query:', hashtag)
+    console.log('[Instagram] - token length:', APIFY_TOKEN.length)
+
+    const apifyItems = await runApifyActor(
       APIFY_INSTAGRAM_HASHTAG_ACTOR,
-      input,
-      limit,
-      hashtag
+      { hashtag, resultsLimit: Math.min(limit * 10, 100) },
+      { timeout: 60000 }
     )
     
-    if (posts.length === 0) {
-      console.log('[Instagram] No posts found, returning demo data')
-      return NextResponse.json({
-        success: true,
-        data: DEMO_INSTAGRAM_POSTS.slice(0, limit),
-        count: Math.min(DEMO_INSTAGRAM_POSTS.length, limit),
-        timestamp: new Date().toISOString()
-      })
+    console.log('[Instagram] Apify result received:')
+    console.log('[Instagram] - Items count:', apifyItems?.length || 0)
+    console.log('[Instagram] - Items type:', typeof apifyItems)
+    console.log('[Instagram] - Is array:', Array.isArray(apifyItems))
+
+    if (!apifyItems || !Array.isArray(apifyItems) || apifyItems.length === 0) {
+      console.warn('[Instagram] No items returned from Apify')
+      throw new Error('No Instagram posts found from Apify')
     }
+
+    console.log('[Instagram] Processing Apify data...')
+    const posts: InstagramPost[] = []
     
-         const response: TrendingResponse = {
-       platform: 'instagram',
-       media: posts,
-       count: posts.length,
-       timestamp: new Date().toISOString(),
-       hashtag: hashtag
-     }
+    for (let i = 0; i < apifyItems.length && posts.length < limit; i++) {
+      const post = apifyItems[i]
+      console.log(`[Instagram] Processing post ${i + 1}:`, {
+        id: post.id,
+        caption: post.caption?.substring(0, 50),
+        likes: post.likesCount,
+        comments: post.commentsCount
+      })
+      
+      try {
+        const likes = post.likesCount || post.likes || 0
+        const comments = post.commentsCount || post.comments || 0
+        const engagement = likes + comments
+        
+        const mappedPost: InstagramPost = {
+          id: post.id || `unknown-${Date.now()}-${i}`,
+          caption: (post.caption || '').substring(0, 200),
+          media_url: post.displayUrl || post.url || '',
+          permalink: post.url || `https://instagram.com/p/${post.id}`,
+          media_type: (post.type === 'Video' ? 'VIDEO' : 'IMAGE') as 'IMAGE' | 'VIDEO',
+          like_count: likes,
+          comments_count: comments,
+          username: post.ownerUsername || 'unknown',
+          hashtags: post.hashtags || [],
+          engagement_level: getEngagementLabel(engagement, 'instagram'),
+          engagement_color: getEngagementColor(engagement, 'instagram'),
+          raw_engagement: engagement,
+          posted_date: post.timestamp || new Date().toISOString()
+        }
+        
+        posts.push(mappedPost)
+        console.log(`[Instagram] Successfully mapped post ${i + 1}`)
+      } catch (mappingError) {
+        console.error(`[Instagram] Error mapping post ${i + 1}:`, mappingError)
+        continue
+      }
+    }
+
+    console.log(`[Instagram] Successfully processed ${posts.length} posts`)
     
-         return NextResponse.json({ success: true, data: response })
+    if (posts.length === 0) {
+      throw new Error('Failed to process any Instagram posts from Apify data')
+    }
+
+    const response = {
+      platform: 'instagram',
+      media: posts,
+      count: posts.length,
+      timestamp: new Date().toISOString(),
+      hashtag: hashtag
+    }
+
+    const duration = Date.now() - startTime
+    console.log(`[Instagram] SUCCESS: Returning ${posts.length} real posts in ${duration}ms`)
+    console.log('[Instagram] =================================')
     
+    return NextResponse.json({ success: true, data: response })
+
   } catch (error) {
-    console.error('[Instagram] Error in GET handler:', error)
+    const duration = Date.now() - startTime
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack : 'No stack trace'
     
-    // NO FILE OPERATIONS - FALLBACK TO DEMO
-    console.log('[Instagram] Falling back to DEMO_INSTAGRAM_POSTS')
-    return NextResponse.json({
-      success: true,
-      data: DEMO_INSTAGRAM_POSTS.slice(0, 3),
-      count: Math.min(DEMO_INSTAGRAM_POSTS.length, 3),
-      timestamp: new Date().toISOString()
-    })
+    console.error('[Instagram] =================================')
+    console.error('[Instagram] ERROR CAUGHT - FALLING BACK TO DEMO DATA')
+    console.error('[Instagram] Error type:', error?.constructor?.name)
+    console.error('[Instagram] Error message:', errorMsg)
+    console.error('[Instagram] Error stack:', errorStack)
+    console.error('[Instagram] Duration before error:', duration + 'ms')
+    console.error('[Instagram] =================================')
+
+    // Return demo data as fallback
+    const response = {
+      platform: 'instagram',
+      media: DEMO_INSTAGRAM_POSTS,
+      count: DEMO_INSTAGRAM_POSTS.length,
+      timestamp: new Date().toISOString(),
+      hashtag: 'demo'
+    }
+
+    console.log('[Instagram] Returning demo data due to error')
+    return NextResponse.json({ success: true, data: response })
   }
 } 
