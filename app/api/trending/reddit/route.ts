@@ -1,36 +1,119 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { 
-  validateLimit, 
-  logApiUsage,
-  createSuccessResponse,
-  createErrorResponse,
-  withErrorHandling,
-  getEngagementLabel,
-  getEngagementColor
-} from '@/lib/api-utils'
-import { TrendingResponse, TrendingApiError, RedditPost } from '@/lib/types'
+import { validateLimit, getEngagementLabel, getEngagementColor } from '@/lib/api-utils'
 
-async function makeRequest(
-  url: string,
+class TrendingApiError extends Error {
+  constructor(message: string, public code: string) {
+    super(message)
+    this.name = 'TrendingApiError'
+  }
+}
+
+interface RedditPost {
+  id: string
+  title: string
+  subreddit: string
+  score: number
+  num_comments: number
+  created_utc: number
+  url: string
+  permalink: string
+  author: string
+  upvote_ratio: number
+  selftext: string
+  thumbnail?: string
+  domain?: string
+  engagement_level: string
+  engagement_color: string
+  posted_date: string
+}
+
+interface TrendingResponse {
+  platform: string
+  subreddit?: string
+  sort?: string
+  time_period?: string
+  posts: RedditPost[]
+  count: number
+  timestamp: string
+}
+
+// Reddit OAuth2 token cache
+let redditToken: { access_token: string; expires_at: number } | null = null
+
+/**
+ * Get Reddit OAuth2 access token using client credentials
+ */
+async function getRedditAccessToken(): Promise<string> {
+  // Check if we have a valid cached token
+  if (redditToken && redditToken.expires_at > Date.now()) {
+    return redditToken.access_token
+  }
+
+  const clientId = process.env.REDDIT_CLIENT_ID
+  const clientSecret = process.env.REDDIT_CLIENT_SECRET
+
+  if (!clientId || !clientSecret) {
+    throw new TrendingApiError('Reddit API credentials not configured', 'CONFIG_ERROR')
+  }
+
+  try {
+    const response = await fetch('https://www.reddit.com/api/v1/access_token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'TrendingTopicTracker/1.0 (by /u/TrendingBot)'
+      },
+      body: 'grant_type=client_credentials'
+    })
+
+    if (!response.ok) {
+      throw new Error(`OAuth2 failed: ${response.status} ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    
+    // Cache the token with expiration (Reddit tokens last 1 hour)
+    redditToken = {
+      access_token: data.access_token,
+      expires_at: Date.now() + (data.expires_in * 1000) - 60000 // Refresh 1 minute early
+    }
+
+    return data.access_token
+  } catch (error) {
+    console.error('Reddit OAuth2 error:', error)
+    throw new TrendingApiError('Failed to authenticate with Reddit API', 'AUTH_ERROR')
+  }
+}
+
+/**
+ * Make authenticated request to Reddit OAuth2 API
+ */
+async function makeRedditRequest(
+  endpoint: string,
   params?: Record<string, any>,
-  headers?: Record<string, string>,
   timeout: number = 10000
 ): Promise<any> {
   try {
-    const urlWithParams = new URL(url)
+    const accessToken = await getRedditAccessToken()
+    
+    const url = new URL(`https://oauth.reddit.com${endpoint}`)
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
-        urlWithParams.searchParams.append(key, String(value))
+        if (value !== undefined && value !== null) {
+          url.searchParams.append(key, String(value))
+        }
       })
     }
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeout)
 
-    const response = await fetch(urlWithParams.toString(), {
+    const response = await fetch(url.toString(), {
       headers: {
+        'Authorization': `Bearer ${accessToken}`,
         'User-Agent': 'TrendingTopicTracker/1.0 (by /u/TrendingBot)',
-        ...headers
+        'Accept': 'application/json'
       },
       signal: controller.signal
     })
@@ -51,55 +134,31 @@ async function makeRequest(
 }
 
 /**
- * Type for Apify Reddit post response item
+ * Format Reddit OAuth2 API response to internal format
  */
-interface ApifyRedditPost {
-  id?: string;
-  title?: string;
-  subreddit?: string;
-  score?: number;
-  ups?: number;
-  numberOfComments?: number;
-  numComments?: number;
-  createdAt?: string | number;
-  created_utc?: number;
-  url?: string;
-  permalink?: string;
-  author?: string;
-  upvoteRatio?: number;
-  selftext?: string;
-  text?: string;
-  thumbnail?: string;
-  domain?: string;
-  stickied?: boolean;
-}
-
-/**
- * Formats raw Apify Reddit data into internal RedditPost type.
- * Filters out stickied posts, sorts by score, and maps fields.
- */
-function formatRedditData(posts: ApifyRedditPost[]): RedditPost[] {
+function formatRedditData(posts: any[]): RedditPost[] {
   return posts
-    .filter((post) => post.title && !post.stickied)
+    .filter((post) => post.data && post.data.title && !post.data.stickied)
     .map((post) => {
-      // Calculate engagement and ensure all fields are present
-      const score = post.score || post.ups || 0
-      const num_comments = post.numberOfComments || post.numComments || 0
-      const created_utc = post.created_utc || (typeof post.createdAt === 'number' ? post.createdAt : (post.createdAt ? Math.floor(new Date(post.createdAt).getTime() / 1000) : 0))
+      const data = post.data
+      const score = data.score || data.ups || 0
+      const num_comments = data.num_comments || 0
+      const created_utc = data.created_utc || 0
+
       const mapped: RedditPost = {
-        id: post.id || '',
-        title: post.title || '',
-        subreddit: post.subreddit || '',
+        id: data.id || '',
+        title: data.title || '',
+        subreddit: data.subreddit || '',
         score,
         num_comments,
         created_utc,
-        url: post.url || '',
-        permalink: post.permalink || `https://reddit.com${post.url}`,
-        author: post.author || '',
-        upvote_ratio: post.upvoteRatio || 0,
-        selftext: post.selftext || post.text || '',
-        thumbnail: post.thumbnail,
-        domain: post.domain,
+        url: data.url || '',
+        permalink: data.permalink ? `https://reddit.com${data.permalink}` : '',
+        author: data.author || '',
+        upvote_ratio: data.upvote_ratio || 0,
+        selftext: data.selftext || '',
+        thumbnail: data.thumbnail,
+        domain: data.domain,
         engagement_level: getEngagementLabel(score, 'reddit'),
         engagement_color: getEngagementColor(score, 'reddit'),
         posted_date: created_utc ? new Date(created_utc * 1000).toISOString() : new Date().toISOString(),
@@ -135,14 +194,18 @@ async function getRedditTrending(
     // If no specific settings provided, use the basic subreddit request
     if (!subredditList && !keywords) {
       try {
-        const subredditPosts = await makeRequest(`https://www.reddit.com/r/${subreddit}.json`, {
-          limit: validatedLimit,
-          sort: finalSort,
-          t: finalTime
-        })
+        const endpoint = `/r/${subreddit}/${finalSort}`
+        const params: Record<string, any> = {
+          limit: validatedLimit
+        }
+        if (finalSort === 'top') {
+          params.t = finalTime
+        }
+
+        const subredditPosts = await makeRedditRequest(endpoint, params)
         if (subredditPosts?.data?.children) {
           const postsWithMatch = subredditPosts.data.children.map((post: any) => ({
-            ...post.data,
+            ...post,
             matchType: 'subreddit',
             matchedSubreddit: subreddit
           }))
@@ -155,24 +218,28 @@ async function getRedditTrending(
     
     // Get posts from target subreddits
     if (subredditList && subredditList.length > 0) {
-      for (const subreddit of subredditList) {
+      for (const targetSubreddit of subredditList) {
         try {
-          const subredditPosts = await makeRequest(`https://www.reddit.com/r/${subreddit}.json`, {
-            limit: 25,
-            sort: finalSort,
-            t: finalTime
-          })
+          const endpoint = `/r/${targetSubreddit}/${finalSort}`
+          const params: Record<string, any> = {
+            limit: 25
+          }
+          if (finalSort === 'top') {
+            params.t = finalTime
+          }
+
+          const subredditPosts = await makeRedditRequest(endpoint, params)
           if (subredditPosts?.data?.children) {
             // Add subreddit match metadata
             const postsWithMatch = subredditPosts.data.children.map((post: any) => ({
-              ...post.data,
+              ...post,
               matchType: 'subreddit',
-              matchedSubreddit: subreddit
+              matchedSubreddit: targetSubreddit
             }))
             allPostsWithMatches.push(...postsWithMatch)
           }
         } catch (error) {
-          console.error(`Error fetching from r/${subreddit}:`, error)
+          console.error(`Error fetching from r/${targetSubreddit}:`, error)
         }
       }
     }
@@ -180,11 +247,15 @@ async function getRedditTrending(
     // Get posts from all subreddits for keyword matching
     if (keywords && keywords.length > 0) {
       try {
-        const allPosts = await makeRequest('https://www.reddit.com/r/all.json', {
-          limit: 100,
-          sort: finalSort,
-          t: finalTime
-        })
+        const endpoint = `/r/all/${finalSort}`
+        const params: Record<string, any> = {
+          limit: 100
+        }
+        if (finalSort === 'top') {
+          params.t = finalTime
+        }
+
+        const allPosts = await makeRedditRequest(endpoint, params)
         if (allPosts?.data?.children) {
           // Filter by keywords and add keyword match metadata
           const keywordPosts = allPosts.data.children.filter((post: any) => {
@@ -200,12 +271,12 @@ async function getRedditTrending(
             }
             
             if (matchedKeywords.length > 0) {
-              post.data.matchType = 'keyword'
-              post.data.matchedKeywords = matchedKeywords
+              post.matchType = 'keyword'
+              post.matchedKeywords = matchedKeywords
               return true
             }
             return false
-          }).map((post: any) => post.data) // Extract the data object
+          })
           
           if (keywordPosts.length > 0) {
             allPostsWithMatches.push(...keywordPosts.slice(0, limit))
@@ -221,83 +292,56 @@ async function getRedditTrending(
     const seenIds = new Set()
     
     for (const post of allPostsWithMatches) {
-      if (seenIds.has(post.id)) {
+      const postData = post.data || post
+      if (seenIds.has(postData.id)) {
         // Post already exists, merge match types
-        const existingPost = uniquePosts.find((p: any) => p.id === post.id)
+        const existingPost = uniquePosts.find((p: any) => (p.data || p).id === postData.id)
         if (existingPost) {
           if (post.matchType === 'subreddit' && existingPost.matchType === 'keyword') {
             existingPost.matchType = 'both'
-            existingPost.matchedSubreddit = post.matchedSubreddit
           } else if (post.matchType === 'keyword' && existingPost.matchType === 'subreddit') {
             existingPost.matchType = 'both'
-            existingPost.matchedKeywords = post.matchedKeywords
           }
         }
       } else {
-        seenIds.add(post.id)
-        
-        // Check if this post should have 'both' type immediately
-        if (subredditList && keywords && 
-            subredditList.some(sub => post.subreddit === sub) && 
-            post.matchedKeywords && post.matchedKeywords.length > 0) {
-          post.matchType = 'both'
-          post.matchedSubreddit = post.subreddit
-        }
-        
+        seenIds.add(postData.id)
         uniquePosts.push(post)
       }
     }
-
-    // Format the data
-    let formattedPosts = formatRedditData(uniquePosts)
-
-    // Apply upvote filtering
+    
+    // Apply minimum upvotes filter if specified
+    let filteredPosts = uniquePosts
     if (minUpvotes && minUpvotes > 0) {
-      const originalCount = formattedPosts.length
-      formattedPosts = formattedPosts.filter(post => post.score >= minUpvotes)
-      
-      // If upvote filtering results in zero posts, use lower threshold
-      if (formattedPosts.length === 0 && originalCount > 0) {
-        console.log(`minUpvotes ${minUpvotes} returned 0 results, trying ${Math.floor(minUpvotes * 0.1)}`)
-        formattedPosts = formatRedditData(uniquePosts).filter(post => post.score >= Math.floor(minUpvotes * 0.1))
-        
-        if (formattedPosts.length === 0) {
-          console.log(`Fallback: returning all posts without upvote filtering`)
-          formattedPosts = formatRedditData(uniquePosts)
-        }
-      }
+      filteredPosts = uniquePosts.filter((post) => {
+        const postData = post.data || post
+        return (postData.score || postData.ups || 0) >= minUpvotes
+      })
     }
     
-    // Sort by score and limit results
-    formattedPosts = formattedPosts
-      .sort((a, b) => b.score - a.score)
-      .slice(0, validatedLimit)
-    
-    // Log usage (Reddit API is free)
-    logApiUsage('Reddit', 'trending', validatedLimit, formattedPosts.length, 0)
+    // Convert to children format and sort by score
+    const children = filteredPosts.map(post => post.data ? post : { data: post })
+    const formattedPosts = formatRedditData(children.slice(0, validatedLimit))
     
     return {
       platform: 'reddit',
-      subreddit: subredditList ? subredditList.join(',') : subreddit,
+      subreddit,
       sort: finalSort,
       time_period: finalTime,
       posts: formattedPosts,
       count: formattedPosts.length,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toISOString()
     }
-    
   } catch (error) {
-    console.error('Reddit trending error:', error)
-    
-    if (error instanceof TrendingApiError) {
-      throw error
+    console.error('Reddit API error:', error)
+    return {
+      platform: 'reddit',
+      subreddit,
+      sort: finalSort,
+      time_period: finalTime,
+      posts: [],
+      count: 0,
+      timestamp: new Date().toISOString()
     }
-    
-    throw new TrendingApiError(
-      `Failed to fetch Reddit trending data: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      'REDDIT_FETCH_FAILED',
-      error
-    )
   }
 }
 
@@ -305,46 +349,57 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     
-    // Extract query parameters
     const subreddit = searchParams.get('subreddit') || 'all'
     const sort = searchParams.get('sort') || 'hot'
     const time = searchParams.get('time') || 'day'
     const limit = parseInt(searchParams.get('limit') || '10')
     
-    // Settings-based parameters
-    const subredditsParam = searchParams.get('subreddits')
-    const keywordsParam = searchParams.get('keywords')
-    const minUpvotes = searchParams.get('minUpvotes') ? parseInt(searchParams.get('minUpvotes')!) : undefined
-    
-    const subredditList = subredditsParam ? subredditsParam.split(',').slice(0, 3) : undefined
-    const keywords = keywordsParam ? keywordsParam.split(',').slice(0, 3) : undefined
-    
-    // Get trending data
-    const data = await withErrorHandling(getRedditTrending)(
-      subreddit, 
-      sort, 
-      time, 
+    // Parse JSON arrays if provided
+    const subredditList = searchParams.get('subreddits') 
+      ? JSON.parse(searchParams.get('subreddits')!) 
+      : undefined
+    const keywords = searchParams.get('keywords') 
+      ? JSON.parse(searchParams.get('keywords')!) 
+      : undefined
+    const minUpvotes = searchParams.get('minUpvotes')
+      ? parseInt(searchParams.get('minUpvotes')!)
+      : undefined
+
+    console.log(`[Reddit] trending: processing request for r/${subreddit}`)
+
+    const result = await getRedditTrending(
+      subreddit,
+      sort,
+      time,
       limit,
       subredditList,
       keywords,
       minUpvotes
     )
-    
-    return NextResponse.json(createSuccessResponse(data))
-    
+
+    console.log(`[Reddit] trending: ${result.count}/${limit} items (est. $${(result.count * 0.0001).toFixed(4)})`)
+
+    return NextResponse.json({
+      success: true,
+      data: result,
+      timestamp: new Date().toISOString()
+    })
   } catch (error) {
-    console.error('Reddit API route error:', error)
+    console.error('[Reddit] API Error:', error)
     
     if (error instanceof TrendingApiError) {
-      return NextResponse.json(
-        createErrorResponse(error.message),
-        { status: 400 }
-      )
+      return NextResponse.json({
+        success: false,
+        error: error.message,
+        code: error.code,
+        timestamp: new Date().toISOString()
+      }, { status: error.code === 'TIMEOUT' ? 408 : 500 })
     }
-    
-    return NextResponse.json(
-      createErrorResponse('Internal server error'),
-      { status: 500 }
-    )
+
+    return NextResponse.json({
+      success: false,
+      error: 'Internal server error',
+      timestamp: new Date().toISOString()
+    }, { status: 500 })
   }
 } 

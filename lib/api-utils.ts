@@ -1,6 +1,9 @@
 import { ApifyClient } from 'apify-client'
 import { TrendingApiError, ApiResponse } from './types'
 
+// Export TrendingApiError for use in other modules
+export { TrendingApiError }
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
