@@ -3,7 +3,7 @@ import { TrendingResponse, InstagramPost } from '@/lib/types'
 import { getEngagementLabel, getEngagementColor, runApifyActor } from '@/lib/api-utils'
 
 // ====== CONFIGURATION ======
-// Build timestamp: 2025-01-20T20:15:00Z - Enhanced error logging for production debugging - FORCE DEPLOY
+// Build timestamp: 2025-01-20T21:15:00Z - REVERT to original working input format with 'search' parameter
 // NO FILE SYSTEM OPERATIONS - VERCEL READ-ONLY ENVIRONMENT
 const APIFY_TOKEN = process.env.APIFY_API_TOKEN
 const APIFY_INSTAGRAM_HASHTAG_ACTOR = 'apify/instagram-scraper'
@@ -151,72 +151,34 @@ export async function GET(request: NextRequest) {
       throw new Error('APIFY_API_TOKEN environment variable is not set')
     }
 
-    console.log('[Instagram] About to call runApifyActor with:')
+    console.log('[Instagram] About to call fetchFromApify with:')
     console.log('[Instagram] - actor:', APIFY_INSTAGRAM_HASHTAG_ACTOR)
     console.log('[Instagram] - query:', hashtag)
-    console.log('[Instagram] - token length:', APIFY_TOKEN.length)
+    console.log('[Instagram] - limit:', limit)
 
-    const apifyItems = await runApifyActor(
+    // Use the format that was working locally
+    const apifyInput = {
+      search: hashtag,
+      searchType: "hashtag",
+      resultsType: "posts", 
+      resultsLimit: Math.min(limit * 10, 100),
+      searchLimit: 1,
+      addParentData: false
+    }
+    
+    console.log('[Instagram] Apify input:', JSON.stringify(apifyInput))
+    
+    const { posts } = await fetchFromApify(
       APIFY_INSTAGRAM_HASHTAG_ACTOR,
-      { hashtag, resultsLimit: Math.min(limit * 10, 100) },
-      { timeout: 60000 }
+      apifyInput,
+      limit,
+      hashtag
     )
     
-    console.log('[Instagram] Apify result received:')
-    console.log('[Instagram] - Items count:', apifyItems?.length || 0)
-    console.log('[Instagram] - Items type:', typeof apifyItems)
-    console.log('[Instagram] - Is array:', Array.isArray(apifyItems))
-
-    if (!apifyItems || !Array.isArray(apifyItems) || apifyItems.length === 0) {
-      console.warn('[Instagram] No items returned from Apify')
-      throw new Error('No Instagram posts found from Apify')
-    }
-
-    console.log('[Instagram] Processing Apify data...')
-    const posts: InstagramPost[] = []
-    
-    for (let i = 0; i < apifyItems.length && posts.length < limit; i++) {
-      const post = apifyItems[i]
-      console.log(`[Instagram] Processing post ${i + 1}:`, {
-        id: post.id,
-        caption: post.caption?.substring(0, 50),
-        likes: post.likesCount,
-        comments: post.commentsCount
-      })
-      
-      try {
-        const likes = post.likesCount || post.likes || 0
-        const comments = post.commentsCount || post.comments || 0
-        const engagement = likes + comments
-        
-        const mappedPost: InstagramPost = {
-          id: post.id || `unknown-${Date.now()}-${i}`,
-          caption: (post.caption || '').substring(0, 200),
-          media_url: post.displayUrl || post.url || '',
-          permalink: post.url || `https://instagram.com/p/${post.id}`,
-          media_type: (post.type === 'Video' ? 'VIDEO' : 'IMAGE') as 'IMAGE' | 'VIDEO',
-          like_count: likes,
-          comments_count: comments,
-          username: post.ownerUsername || 'unknown',
-          hashtags: post.hashtags || [],
-          engagement_level: getEngagementLabel(engagement, 'instagram'),
-          engagement_color: getEngagementColor(engagement, 'instagram'),
-          raw_engagement: engagement,
-          posted_date: post.timestamp || new Date().toISOString()
-        }
-        
-        posts.push(mappedPost)
-        console.log(`[Instagram] Successfully mapped post ${i + 1}`)
-      } catch (mappingError) {
-        console.error(`[Instagram] Error mapping post ${i + 1}:`, mappingError)
-        continue
-      }
-    }
-
-    console.log(`[Instagram] Successfully processed ${posts.length} posts`)
+    console.log(`[Instagram] fetchFromApify returned ${posts.length} posts`)
     
     if (posts.length === 0) {
-      throw new Error('Failed to process any Instagram posts from Apify data')
+      throw new Error('No Instagram posts returned from fetchFromApify')
     }
 
     const response = {
