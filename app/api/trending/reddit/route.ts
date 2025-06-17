@@ -57,6 +57,8 @@ async function getRedditAccessToken(): Promise<string> {
   }
 
   try {
+    console.log(`[Reddit] Requesting OAuth2 token with clientId: ${clientId?.substring(0, 8)}...`)
+    
     const response = await fetch('https://www.reddit.com/api/v1/access_token', {
       method: 'POST',
       headers: {
@@ -67,11 +69,16 @@ async function getRedditAccessToken(): Promise<string> {
       body: 'grant_type=client_credentials'
     })
 
+    console.log(`[Reddit] OAuth2 response: ${response.status} ${response.statusText}`)
+
     if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`[Reddit] OAuth2 error details:`, errorText)
       throw new Error(`OAuth2 failed: ${response.status} ${response.statusText}`)
     }
 
     const data = await response.json()
+    console.log(`[Reddit] OAuth2 success, token type: ${data.token_type}, expires_in: ${data.expires_in}s`)
     
     // Cache the token with expiration (Reddit tokens last 1 hour)
     redditToken = {
@@ -109,6 +116,8 @@ async function makeRedditRequest(
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeout)
 
+    console.log(`[Reddit] Making API request to: ${url.toString()}`)
+    
     const response = await fetch(url.toString(), {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -119,12 +128,18 @@ async function makeRedditRequest(
     })
 
     clearTimeout(timeoutId)
+    
+    console.log(`[Reddit] API response: ${response.status} ${response.statusText}`)
 
     if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`[Reddit] API error details:`, errorText)
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
     }
 
-    return await response.json()
+    const responseData = await response.json()
+    console.log(`[Reddit] API response data keys:`, Object.keys(responseData || {}))
+    return responseData
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new TrendingApiError('Request timeout', 'TIMEOUT')
@@ -203,6 +218,13 @@ async function getRedditTrending(
         }
 
         const subredditPosts = await makeRedditRequest(endpoint, params)
+        console.log(`[Reddit] Response structure:`, {
+          hasData: !!subredditPosts?.data,
+          hasChildren: !!subredditPosts?.data?.children,
+          childrenCount: subredditPosts?.data?.children?.length || 0,
+          firstPost: subredditPosts?.data?.children?.[0]?.data?.title || 'N/A'
+        })
+        
         if (subredditPosts?.data?.children) {
           const postsWithMatch = subredditPosts.data.children.map((post: any) => ({
             ...post,
@@ -210,9 +232,16 @@ async function getRedditTrending(
             matchedSubreddit: subreddit
           }))
           allPostsWithMatches.push(...postsWithMatch)
+          console.log(`[Reddit] Added ${postsWithMatch.length} posts from r/${subreddit}`)
+        } else {
+          console.warn(`[Reddit] No children found in response for r/${subreddit}:`, subredditPosts)
         }
       } catch (error) {
-        console.error(`Error fetching from r/${subreddit}:`, error)
+        console.error(`[Reddit] Error fetching from r/${subreddit}:`, error)
+        // Re-throw critical authentication errors instead of silently continuing
+        if (error instanceof TrendingApiError && error.code === 'AUTH_ERROR') {
+          throw error
+        }
       }
     }
     
