@@ -3,9 +3,9 @@ import { TrendingResponse, InstagramPost } from '@/lib/types'
 import { getEngagementLabel, getEngagementColor, runApifyActor } from '@/lib/api-utils'
 
 // ====== CONFIGURATION ======
-// Build timestamp: 2025-01-20T18:00:00Z - Force clean deployment
-// NO FILE SYSTEM OPERATIONS - VERCEL READ-ONLY ENVIRONMENT
-const APIFY_TOKEN = process.env.APIFY_API_TOKEN // <-- Set this in your .env.local
+// DEPLOYMENT SIGNATURE: 2025-01-20-CACHE-BUST-v3
+// CRITICAL: NO FILE SYSTEM OPERATIONS - VERCEL READ-ONLY
+const APIFY_TOKEN = process.env.APIFY_API_TOKEN
 const APIFY_INSTAGRAM_HASHTAG_ACTOR = 'apify/instagram-scraper'
 const APIFY_INSTAGRAM_PROFILE_ACTOR = 'apify/instagram-profile-scraper'
 
@@ -17,209 +17,175 @@ const DEMO_INSTAGRAM_POSTS: InstagramPost[] = [
     media_url: 'https://instagram.com/p/demo1',
     permalink: 'https://instagram.com/p/demo1',
     media_type: 'IMAGE',
-    timestamp: new Date().toISOString(),
     like_count: 123,
-    comments_count: 4,
+    comments_count: 45,
     username: 'demo_user',
-    raw_engagement: 127,
-    engagement_level: getEngagementLabel(127, 'instagram'),
-    engagement_color: getEngagementColor(127, 'instagram'),
-    posted_date: new Date().toISOString(),
-  },
+    hashtags: ['productivity', 'demo'],
+    engagement_level: 'Low',
+    engagement_color: '#6b7280',
+    raw_engagement: 168,
+    posted_date: new Date(Date.now() - 3600000).toISOString()
+  }
 ]
 
-/**
- * Type for Apify Instagram hashtag or profile response item
- */
-interface ApifyInstagramPost {
-  id?: string;
-  url?: string;
-  permalink?: string;
-  caption?: string;
-  displayUrl?: string;
-  image?: string;
-  mediaUrl?: string;
-  type?: string;
-  mediaType?: string;
-  timestamp?: string;
-  date?: string;
-  likesCount?: number;
-  likeCount?: number;
-  commentsCount?: number;
-  commentCount?: number;
-  ownerUsername?: string;
-  username?: string;
-  hashtag?: string;
-}
-
+// ====== INTERFACES ======
 interface ApifyInstagramHashtag {
-  id: string;
-  topPosts?: ApifyInstagramPost[];
-  latestPosts?: ApifyInstagramPost[];
+  allPosts?: Array<{
+    id: string
+    caption?: string
+    url?: string
+    displayUrl?: string
+    type?: string
+    likesCount?: number
+    commentsCount?: number
+    ownerUsername?: string
+    timestamp?: string
+    hashtags?: string[]
+  }>
 }
 
-/**
- * Fetches Instagram posts from Apify for a given actor and input.
- * Handles both hashtag and user profile queries.
- * Filters, sorts, and maps posts to internal format.
- */
+// ====== CORE FETCH FUNCTION ======
 async function fetchFromApify(actorId: string, input: any, limit: number, searchQuery: string): Promise<{ posts: InstagramPost[], hashtags: ApifyInstagramHashtag[] }> {
-  // Use the same working Apify pattern as Twitter/TikTok
-  const timeout = 60 * 1000; // 60 seconds
+  console.log(`[Instagram] About to call Apify for query: ${searchQuery}`)
+  
+  // CRITICAL: NO FILE OPERATIONS - ALL LOGGING TO CONSOLE ONLY
+  const timeout = 60 * 1000
   const runRes = await runApifyActor(actorId, input, { timeout })
   const items: ApifyInstagramHashtag[] = runRes
   
   console.log(`[Instagram] Apify response status: success`)
   console.log(`[Instagram] Apify raw items count: ${Array.isArray(items) ? items.length : 'not array'}`)
-  // 1. Extract all nested posts from all hashtags
-  const allPosts: ApifyInstagramPost[] = []
   
-  if (Array.isArray(items) && items.length > 0) {
-    const firstItem = items[0];
-    
-    // Check if this is nested hashtag structure (search-based)
-    if (firstItem.topPosts || firstItem.latestPosts) {
-      // Nested structure from search-based approach
-      for (const hashtagObj of items) {
-        if (Array.isArray(hashtagObj.topPosts)) {
-          allPosts.push(...hashtagObj.topPosts.map((post) => ({ ...post, hashtag: hashtagObj.id })))
-        }
-        if (Array.isArray(hashtagObj.latestPosts)) {
-          allPosts.push(...hashtagObj.latestPosts.map((post) => ({ ...post, hashtag: hashtagObj.id })))
-        }
-      }
-    } else {
-      // Direct posts structure (directUrls approach)
-      allPosts.push(...items.map((post) => ({ ...post, hashtag: searchQuery })))
+  // Extract all posts
+  let allPosts: any[] = []
+  for (const item of items) {
+    if (item.allPosts && Array.isArray(item.allPosts)) {
+      allPosts.push(...item.allPosts)
     }
   }
   
   console.log(`[Instagram] Extracted allPosts count: ${allPosts.length}`)
-  // 2. Shortlist trending posts (recent + high engagement)
-  const now = Date.now()
+  
+  // Filter recent posts (last 48 hours)
+  const cutoffTime = Date.now() - (48 * 60 * 60 * 1000)
   const recentPosts = allPosts.filter(post => {
-    const postTime = new Date(post.timestamp || post.date || '').getTime()
-    return (now - postTime) < 48 * 60 * 60 * 1000 // last 48h
+    if (!post.timestamp) return false
+    const postTime = new Date(post.timestamp).getTime()
+    return postTime > cutoffTime
   })
+  
   console.log(`[Instagram] Recent posts (last 48h) count: ${recentPosts.length}`)
-  recentPosts.forEach(post => {
-    // Calculate engagement as likes + comments
-    (post as any).engagement = (post.likesCount || post.likeCount || 0) + (post.commentsCount || post.commentCount || 0)
-  })
-  const sorted = recentPosts.sort((a: any, b: any) => b.engagement - a.engagement)
-  // Use top 50% of recent posts or requested limit, whichever is smaller
-  const top50pctIndex = Math.ceil(sorted.length * 0.5)
-  const maxTrending = Math.min(top50pctIndex, limit * 2) // At least double the requested limit
-  const shortlisted = sorted.slice(0, maxTrending)
-  console.log(`[Instagram] Shortlisted trending posts count: ${shortlisted.length}`)
-  // 3. Calculate trending hashtags by recent post count (last 24h)
-  const hashtagsWithTrending = items.map((h) => {
-    const posts = [...(h.topPosts || []), ...(h.latestPosts || [])]
-    const postsLast24h = posts.filter((p) => (now - new Date(p.timestamp || p.date || '').getTime()) < 24 * 60 * 60 * 1000).length
-    return { ...h, postsLast24h }
-  })
-  // Sort hashtags by postsLast24h and mark top 3 as trending
-  const sortedHashtags = hashtagsWithTrending.sort((a, b) => b.postsLast24h - a.postsLast24h)
-  const trendingHashtagIds = new Set(sortedHashtags.slice(0, 3).map((h) => h.id))
-  const hashtagsFinal = hashtagsWithTrending.map((h) => ({ ...h, isTrending: trendingHashtagIds.has(h.id) }))
-  // 4. Map posts to InstagramPost type (limit to requested number)
-  const posts = shortlisted.slice(0, limit).map((item: ApifyInstagramPost) => {
-    const like_count = item.likesCount || item.likeCount || 0
-    const comments_count = item.commentsCount || item.commentCount || 0
-    const raw_engagement = like_count + comments_count
-    // Ensure hashtags is always an array
-    const hashtags = item.hashtag ? [item.hashtag] : []
-    // Ensure date parsing is safe
-    const dateStr = item.timestamp || item.date
-    /**
-     * Map ApifyInstagramPost to internal InstagramPost type
-     */
-    const mapped: InstagramPost = {
-      id: item.id || item.url || item.permalink || '',
-      caption: item.caption || '',
-      media_url: item.displayUrl || item.image || item.mediaUrl || '',
-      permalink: item.url || item.permalink || '',
-      media_type: (item.type || item.mediaType || 'IMAGE').toUpperCase() as any,
-      timestamp: dateStr ? new Date(dateStr).toISOString() : new Date().toISOString(),
-      like_count,
-      comments_count,
-      username: item.ownerUsername || item.username || '',
-      raw_engagement,
-      engagement_level: getEngagementLabel(raw_engagement, 'instagram'),
-      engagement_color: getEngagementColor(raw_engagement, 'instagram'),
-      hashtags,
-      posted_date: dateStr ? new Date(dateStr).toISOString() : new Date().toISOString(),
-    }
-    console.log(`[Instagram] Mapped post: ${JSON.stringify(mapped).substring(0, 300)}...`)
-    return mapped
-  })
-  console.log(`[Instagram] Final posts returned count: ${posts.length}`)
-  return { posts, hashtags: hashtagsFinal }
+  
+  // Trending algorithm: prioritize by engagement
+  const trendingPosts = recentPosts
+    .filter(post => post.likesCount && post.likesCount > 50)
+    .sort((a, b) => {
+      const aEngagement = (a.likesCount || 0) + (a.commentsCount || 0) * 5
+      const bEngagement = (b.likesCount || 0) + (b.commentsCount || 0) * 5
+      return bEngagement - aEngagement
+    })
+    .slice(0, limit * 2)
+  
+  console.log(`[Instagram] Shortlisted trending posts count: ${trendingPosts.length}`)
+  
+  // Map to our format
+  const mappedPosts: InstagramPost[] = trendingPosts
+    .slice(0, limit)
+    .map(post => {
+      const likes = post.likesCount || 0
+      const comments = post.commentsCount || 0
+      const engagement = likes + (comments * 5)
+      
+             const mapped: InstagramPost = {
+         id: post.id || `unknown-${Date.now()}`,
+         caption: (post.caption || '').substring(0, 200),
+         media_url: post.displayUrl || post.url || '',
+         permalink: post.url || `https://instagram.com/p/${post.id}`,
+         media_type: (post.type === 'Video' ? 'VIDEO' : 'IMAGE') as 'IMAGE' | 'VIDEO',
+         like_count: likes,
+         comments_count: comments,
+         username: post.ownerUsername || 'unknown',
+         hashtags: post.hashtags || [],
+         engagement_level: getEngagementLabel(engagement, 'instagram'),
+         engagement_color: getEngagementColor(engagement, 'instagram'),
+         raw_engagement: engagement,
+         posted_date: post.timestamp || new Date().toISOString()
+       }
+      
+      console.log(`[Instagram] Mapped post: ${JSON.stringify(mapped).substring(0, 200)}...`)
+      return mapped
+    })
+  
+  console.log(`[Instagram] Final posts returned count: ${mappedPosts.length}`)
+  
+  return {
+    posts: mappedPosts,
+    hashtags: items
+  }
 }
 
-// ====== MAIN API ROUTE ======
-export async function GET(req: NextRequest) {
-  process.stdout.write(`[Instagram] GET handler called: ${req.url}\n`)
-  console.log('[Instagram] GET handler called:', req.url)
-  const { searchParams } = new URL(req.url)
-  const query = searchParams.get('hashtag') || searchParams.get('query') || ''
-  const limit = parseInt(searchParams.get('limit') || '20', 10)
-  if (!query) {
-    process.stdout.write('[Instagram] Missing query param\n')
-    return NextResponse.json({ error: 'Missing query' }, { status: 400 })
-  }
-  let posts: InstagramPost[] = []
-  let hashtags: ApifyInstagramHashtag[] = []
-
+// ====== API HANDLER ======
+export async function GET(request: NextRequest) {
+  console.log(`[Instagram] GET handler called: ${request.url}`)
+  
+  // NO FILE OPERATIONS - CONSOLE LOGGING ONLY
   try {
-    process.stdout.write(`[Instagram] About to call Apify for query: ${query}\n`)
-    let apifyInput
-    let actorId = APIFY_INSTAGRAM_HASHTAG_ACTOR
-    if (query.startsWith('@')) {
-      // User profile search
-      const username = query.replace('@', '')
-      apifyInput = {
-        search: username,
-        searchType: 'user',
-        searchLimit: 5,
-        resultsType: 'posts',
-        resultsLimit: limit,
-        addParentData: false,
-        enhanceUserSearchWithFacebookPage: false,
-        isUserReelFeedURL: false,
-        isUserTaggedFeedURL: false
-      }
-    } else {
-      // Hashtag search - revert to search-based with limits
-      const hashtag = query.replace('#', '')
-      apifyInput = {
-        search: hashtag,
-        searchType: 'hashtag',
-        resultsType: 'posts',
-        resultsLimit: 10, // Fixed cap to prevent timeouts
-        searchLimit: 1,
-        addParentData: false
-      }
+    const { searchParams } = new URL(request.url)
+    const hashtag = searchParams.get('hashtag') || 'productivity'
+    const limit = Math.min(parseInt(searchParams.get('limit') || '10'), 20)
+    
+    if (!APIFY_TOKEN) {
+      console.log('[Instagram] No APIFY_TOKEN, falling back to demo data')
+      return NextResponse.json({
+        success: true,
+        data: DEMO_INSTAGRAM_POSTS.slice(0, limit),
+        count: Math.min(DEMO_INSTAGRAM_POSTS.length, limit),
+        timestamp: new Date().toISOString()
+      })
     }
-    const result = await fetchFromApify(actorId, apifyInput, limit, query)
-    posts = result.posts
-    hashtags = result.hashtags
-    if (!posts.length) throw new Error('No posts found')
-  } catch (e) {
-    process.stdout.write(`[Instagram] Error in GET handler: ${e}\n`)
-    console.error('[Instagram] Error in GET handler:', e)
-    process.stdout.write('[Instagram] Falling back to DEMO_INSTAGRAM_POSTS\n')
-    console.warn('[Instagram] Falling back to DEMO_INSTAGRAM_POSTS')
-    posts = DEMO_INSTAGRAM_POSTS.slice(0, limit)
+    
+    const input = {
+      hashtags: [hashtag],
+      resultsLimit: 50
+    }
+    
+    const { posts } = await fetchFromApify(
+      APIFY_INSTAGRAM_HASHTAG_ACTOR,
+      input,
+      limit,
+      hashtag
+    )
+    
+    if (posts.length === 0) {
+      console.log('[Instagram] No posts found, returning demo data')
+      return NextResponse.json({
+        success: true,
+        data: DEMO_INSTAGRAM_POSTS.slice(0, limit),
+        count: Math.min(DEMO_INSTAGRAM_POSTS.length, limit),
+        timestamp: new Date().toISOString()
+      })
+    }
+    
+         const response: TrendingResponse = {
+       platform: 'instagram',
+       media: posts,
+       count: posts.length,
+       timestamp: new Date().toISOString(),
+       hashtag: hashtag
+     }
+    
+         return NextResponse.json({ success: true, data: response })
+    
+  } catch (error) {
+    console.error('[Instagram] Error in GET handler:', error)
+    
+    // NO FILE OPERATIONS - FALLBACK TO DEMO
+    console.log('[Instagram] Falling back to DEMO_INSTAGRAM_POSTS')
+    return NextResponse.json({
+      success: true,
+      data: DEMO_INSTAGRAM_POSTS.slice(0, 3),
+      count: Math.min(DEMO_INSTAGRAM_POSTS.length, 3),
+      timestamp: new Date().toISOString()
+    })
   }
-
-  const response: TrendingResponse = {
-    platform: 'instagram',
-    hashtag: query,
-    media: posts,
-    count: posts.length,
-    timestamp: new Date().toISOString(),
-    query,
-  }
-  return NextResponse.json({ success: true, data: response })
 } 
