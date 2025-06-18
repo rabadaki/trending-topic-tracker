@@ -40,20 +40,20 @@ async function getTikTokTrending(
   // Validate and sanitize inputs
   const validatedLimit = validateLimit(limit, 50)
   
-  // Prepare Apify input for TikTok scraper (optimized for global trending)
+  // Prepare Apify input for TikTok scraper (optimized for trending content)
   const apifyInput = {
-    searchQueries: query ? [query] : [], // Use hashtags for trending when no query
-    resultsPerPage: validatedLimit,
-    hashtags: hashtag ? [hashtag] : ['#viral'], // Single hashtag for speed
+    searchQueries: hashtag ? [`${hashtag.replace('#', '')}`] : query ? [query] : ['productivity'], // Search for hashtag content
+    resultsPerPage: validatedLimit * 2, // Get more results to filter trending ones
+    hashtags: [], // Don't use hashtags parameter, use searchQueries instead
     excludePinnedPosts: false,
     shouldDownloadCovers: false,
     shouldDownloadSlideshowImages: false,
     shouldDownloadSubtitles: false,
     shouldDownloadVideos: false,
     profileScrapeSections: ['videos'],
-    profileSorting: 'latest',
-    searchSection: '',
-    maxProfilesPerQuery: 10,
+    profileSorting: 'popular', // Sort by popular/trending instead of latest
+    searchSection: '', // Use empty string as per error message
+    maxProfilesPerQuery: 50, // Increase to get more diverse content
   }
   
   try {
