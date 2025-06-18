@@ -30,6 +30,8 @@ const DEMO_INSTAGRAM_POSTS: InstagramPost[] = [
 
 // ====== INTERFACES ======
 interface ApifyInstagramHashtag {
+  name?: string
+  postsCount?: number
   allPosts?: Array<{
     id: string
     caption?: string
@@ -44,23 +46,92 @@ interface ApifyInstagramHashtag {
   }>
 }
 
+interface ApifyInstagramPost {
+  id: string
+  caption?: string
+  url?: string
+  displayUrl?: string
+  type?: string
+  likesCount?: number
+  commentsCount?: number
+  ownerUsername?: string
+  timestamp?: string
+  hashtags?: string[]
+}
+
+type ApifyInstagramItem = ApifyInstagramHashtag | ApifyInstagramPost
+
 // ====== CORE FETCH FUNCTION ======
+// Type guards
+function isPost(item: ApifyInstagramItem): item is ApifyInstagramPost {
+  return 'id' in item && (item.caption !== undefined || item.displayUrl !== undefined || item.ownerUsername !== undefined)
+}
+
+function isHashtagMeta(item: ApifyInstagramItem): item is ApifyInstagramHashtag {
+  return 'name' in item && 'postsCount' in item
+}
+
 async function fetchFromApify(actorId: string, input: any, limit: number, searchQuery: string): Promise<{ posts: InstagramPost[], hashtags: ApifyInstagramHashtag[] }> {
   console.log(`[Instagram] About to call Apify for query: ${searchQuery}`)
   
   // CRITICAL: NO FILE OPERATIONS - ALL LOGGING TO CONSOLE ONLY
   const timeout = 60 * 1000
   const runRes = await runApifyActor(actorId, input, { timeout })
-  const items: ApifyInstagramHashtag[] = runRes
+  const items: ApifyInstagramItem[] = runRes
   
   console.log(`[Instagram] Apify response status: success`)
   console.log(`[Instagram] Apify raw items count: ${Array.isArray(items) ? items.length : 'not array'}`)
   
-  // Extract all posts
+  // DEBUG: Log the actual structure of what Apify returned
+  console.log(`[Instagram] First item structure:`, JSON.stringify(items[0], null, 2))
+  console.log(`[Instagram] First item keys:`, Object.keys(items[0] || {}))
+  
+  // Extract all posts - Apify returns posts as separate array items, not nested fields
   let allPosts: any[] = []
   for (const item of items) {
-    if (item.allPosts && Array.isArray(item.allPosts)) {
-      allPosts.push(...item.allPosts)
+    console.log(`[Instagram] Processing item with keys:`, Object.keys(item || {}))
+    
+    // Check if this item IS a post (has post-specific fields) vs hashtag metadata
+    if (isPost(item)) {
+      console.log(`[Instagram] Found direct post object with id: ${item.id}`)
+      allPosts.push(item)
+    } else if (isHashtagMeta(item)) {
+      console.log(`[Instagram] Processing hashtag metadata item: ${item.name}`)
+      // Extract posts from hashtag metadata's nested arrays
+      const possibleFields = ['allPosts', 'posts', 'topPosts', 'latestPosts'] as const
+      let foundPosts = false
+      
+      for (const field of possibleFields) {
+        const fieldValue = (item as any)[field]
+        if (fieldValue && Array.isArray(fieldValue)) {
+          console.log(`[Instagram] Found ${field} array with length:`, fieldValue.length)
+          allPosts.push(...fieldValue)
+          foundPosts = true
+          // Don't break - collect from ALL possible fields
+        }
+      }
+      
+      if (!foundPosts) {
+        console.log(`[Instagram] No posts found in hashtag metadata. Available fields:`, Object.keys(item || {}))
+      }
+    } else {
+      // Fallback: try nested fields for other scraper formats
+      const possibleFields = ['allPosts', 'posts', 'topPosts', 'latestPosts'] as const
+      let foundPosts = false
+      
+      for (const field of possibleFields) {
+        const fieldValue = (item as any)[field]
+        if (fieldValue && Array.isArray(fieldValue)) {
+          console.log(`[Instagram] Found ${field} array with length:`, fieldValue.length)
+          allPosts.push(...fieldValue)
+          foundPosts = true
+          // Don't break - collect from ALL possible fields
+        }
+      }
+      
+      if (!foundPosts) {
+        console.log(`[Instagram] Unrecognized item structure. Available fields:`, Object.keys(item || {}))
+      }
     }
   }
   
@@ -118,9 +189,12 @@ async function fetchFromApify(actorId: string, input: any, limit: number, search
   
   console.log(`[Instagram] Final posts returned count: ${mappedPosts.length}`)
   
+  // Filter out hashtag metadata for return
+  const hashtagItems = items.filter(isHashtagMeta)
+  
   return {
     posts: mappedPosts,
-    hashtags: items
+    hashtags: hashtagItems
   }
 }
 
